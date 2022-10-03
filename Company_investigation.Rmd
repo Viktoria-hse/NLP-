@@ -1,0 +1,729 @@
+---
+title: "Анализ комментариев сотрудников и покупателей о компании"
+output: 
+  html_document: 
+    code_folding: show
+    theme: cosmo
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+ Сегодня я хочу предложить вам рассмотреть вопрос об оценки сети с точки зрения текстов покупателей о сети "Улыбка Радуги" и отзывов сотрудников о работе в компании. Данные, представлены в виде двух таблиц - первая содержит комментарии покупателей, никнейм, оценку сети, а также дату написания комментария.Помимо нашей компании в данный датасет попали также комментарии по нашим главным конкурентам - Сети "Подружка", "Магнит косметик" и Летуаль. Вторая таблица - отзывы сотрудников только о сети "Улыбка радуги".Вторая таблица состоит из отзывов сотрудников, даты, должности, города, где сотрудник работал.
+ Данные были спарсены с сайтов ireccomend и dreamjob.
+ 
+ Цели данного исследования проверить :
+ 
+ 1) О чем чаще всего пишут наши покупатели в комментариях
+ 
+ 2) Какие главные проблемы существуют (выделить темы)
+ 
+ 3) Чем мы похожи, а чем отличаемся от наших главных конкурентов
+ 
+ 4) На что больше всего жалуются наши сотрудники
+ 
+ 5) Выявить проблемны по должностям и времени
+ 
+ 6) Оценить настроения по комментариям наших покупателей и сотрудников
+ 
+## Загружаем данные
+ 
+```{r message=FALSE, warning=FALSE}
+library(readxl)
+text_reccomendations <- read_excel("~/text_reccomendations.xlsx", 
+    col_types = c("numeric", "text", "text", 
+        "date", "text", "numeric", "text"))
+workers_reccomendations <- read_excel("~/text_reccomendations.xlsx", 
+    sheet = "workers_message", col_types = c("numeric", 
+        "date", "text", "text", "text"))
+head(text_reccomendations)
+head(workers_reccomendations)
+```
+
+## Посмотрим на структуру и данные
+
+```{r message=FALSE, warning=FALSE}
+library(ggplot2)
+library(dplyr)
+text_reccomendations$Rating = as.numeric(text_reccomendations$Rating)
+text_reccomendationss=text_reccomendations %>% group_by(Shop) %>% summarise(RATE=mean(Rating))
+ggplot(text_reccomendationss,aes(Shop,RATE,fill=Shop))+geom_col()+labs(title="Средний рейтинг по магазинам")+geom_text(aes(label = round(RATE,3), vjust = -0.2))
+library(lubridate)
+text_reccomendations$Date=ymd(text_reccomendations$Date)
+text_reccomendations$Date=as.Date(text_reccomendations$Date)
+text_reccomendations =text_reccomendations %>% mutate(Month=month(Date,label = TRUE, abbr = FALSE))
+text_reccomendations = text_reccomendations %>% mutate(Year=year(Date))
+date =text_reccomendations %>% group_by(Shop,Year) %>% count()
+date = na.omit(date)
+library(plotly)
+plot1=ggplot(date,aes(Year,n,fill=Shop))+geom_col()+labs(title="Кол-во отзывов по годам и магазинам")+coord_flip()+facet_wrap(~ Shop)
+ggplotly(plot1)
+date2 =text_reccomendations %>% group_by(Shop,Month) %>% count()
+date2 = na.omit(date2)
+plot2=ggplot(date2,aes(Month,n,fill=Shop))+geom_col()+labs(title="Кол-во отзывов по месяцам и магазинам")+coord_flip()+facet_wrap(~ Shop)
+ggplotly(plot2)
+
+# Когда чаще всего пишут отзывы сотрудники?
+ggplot(workers_reccomendations,aes(City,fill=City))+geom_bar()+labs(title="Количество отзывов сотрудников по городам")+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+ggplot(workers_reccomendations,aes(Позиция,fill=Позиция))+geom_bar()+labs(title="Количество отзывов сотрудников по городам")+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+ggplot(workers_reccomendations,aes(date,fill=Позиция))+geom_histogram()+labs(title="Количество отзывов сотрудников по городам")+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+#workers_reccomendations$Date=as.Date(workers_reccomendations$Date)
+workers_reccomendations =text_reccomendations %>% mutate(Month=month(Date,label = TRUE, abbr = FALSE))
+date2 =workers_reccomendations %>% group_by(Month) %>% count()
+date2 = na.omit(date2)
+ggplot(date2,aes(Month,n,fill=Month))+geom_col()+theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+labs(title="Количество отзывов сотрудников")
+```
+За 2021 год всего было написано 11 комментариев, а за 2022 7.Пик написания комментариев приходится на лето для всех сетей.
+Сотрудники чаще всего пишут комментарии в Санкт-Петербурге.Пик написания отзывов приходится на ноябрь-декабрь.
+
+## Приступим к текстам
+
+Для начала посмотрим, насколько отзывы похожи 
+
+```{r}
+library(tidytext)
+vv.tidy= text_reccomendations %>%
+    unnest_tokens(words, Texts, token = "words")
+
+```
+
+```{r}
+vv.tidy %>%
+    dplyr::select(words) %>%
+    n_distinct() 
+```
+
+```{r}
+vv.tidy %>%
+    dplyr::count(words) %>%
+    top_n(15, n) %>%
+    ggplot(aes(x = reorder(words, n), y = n)) +
+    geom_col() +
+    labs(x = "word") + 
+    coord_flip() +
+    theme_minimal()
+```
+
+## Частотность языковых знаков. Закон Ципфа
+
+```{r}
+vv.tidy %>%
+    dplyr::count(words, sort = TRUE) %>%
+    filter(n > 250) %>%
+    ggplot(aes(rev(reorder(words, n)), n)) +
+    geom_bar(stat = "identity", show.legend = FALSE) +
+    theme_minimal()
+vv.tidy %>%
+    dplyr::count(words, sort = TRUE) %>%
+    dplyr::mutate(rank = row_number()) %>%
+    ggplot(aes(rank, n)) +
+    geom_line() +
+    scale_x_log10() +
+    scale_y_log10()
+```
+
+## Стоп-слова
+
+Самые частотные слова в языке — предлоги, союзы, местоимения — имеют самые абстрактные значения. Если нас интересует содержание текста, они для нас неинформативны. Назовем их «стоп-слова» и попробуем выкинуть из текста. 
+
+В пакете stopwords уже есть заготовленный список стоп-слов для русского языка (и не только для русского). 
+
+```{r}
+library(stopwords)
+head(stopwords("ru"), 20)
+```
+
+Мы уже видели очень похожий список... 
+
+```{r}
+library(dplyr)
+top100words = vv.tidy %>%
+    dplyr::count(words, sort=TRUE) %>%
+    top_n(100, n)
+
+top100words$words
+```
+
+Выбросим из текстов стоп-слова и посмотрим, что осталось.
+
+Важно: если мы используем anti_join, то колонки, в которых хранятся слова, должны быть названы одинаково в обоих датасетах (vv.tidy и rustopwords), чтобы датасеты соединились автоматически, либо в anti_join нужно прописать параметр by
+
+```{r}
+rustopwords = data.frame(words=stopwords("ru"), stringsAsFactors=FALSE)
+vv.nonstop = vv.tidy %>%
+    anti_join(rustopwords)
+
+vv.nonstop = filter(vv.tidy,!(words %in% c(stopwords("ru"),"это")))
+```
+
+На сколько процентов уменьшился объем текста?
+
+## Облако слов
+
+Теперь построим список самых частотных слов в форме облака слов.
+
+```{r s1, fig.height=7, fig.width=7}
+library(wordcloud2)
+
+vv.nonstop.counts = vv.nonstop %>%
+    dplyr::count(words, sort=TRUE) %>% 
+    top_n(150, n)
+
+wordcloud2(data = vv.nonstop.counts)
+```
+
+Построим частотные списки для текстовдля каждой сети в виде облаков слов. Используем список стоп-слов из пакета stopwords.
+
+```{r message=FALSE, warning=FALSE}
+vig = vv.tidy %>% filter(Shop == "Rainbow_smile")
+
+vig = vig %>% anti_join(rustopwords)
+vig = vig %>%
+    dplyr::count(words, sort=TRUE) %>% 
+    top_n(50, n)
+vig
+wordcloud2(data = vig)
+```
+
+```{r}
+v = vv.tidy %>% filter(Shop == "Podrugka")
+
+v = v %>% anti_join(rustopwords)
+v = v %>%
+    dplyr::count(words, sort=TRUE) %>% 
+    top_n(50, n)
+
+wordcloud2(data = v)
+```
+
+```{r}
+v = vv.tidy %>% filter(Shop == "Magnit")
+
+v = v %>% anti_join(rustopwords)
+v = v %>%
+    dplyr::count(words, sort=TRUE) %>% 
+    top_n(50, n)
+
+wordcloud2(data = v)
+```
+
+```{r}
+v = vv.tidy %>% filter(Shop == "Letual")
+
+v = v %>% anti_join(rustopwords)
+v = v %>%
+    dplyr::count(words, sort=TRUE) %>% 
+    top_n(50, n)
+
+wordcloud2(data = v)
+```
+
+Оставим только стоп-слова:
+
+```{r}
+vv.stop = vv.tidy %>%
+    inner_join(rustopwords)
+```
+
+
+Используем для стилометрии. Чтобы нарисовать на двумерном графике представление по осям, соответствующим всем нашим местоимениям, будем использовать анализ главных компонент ("собирать" оси в более крупные компоненты)
+
+```{r}
+pers.pronouns = c("я","мне","ты", "тебе", "он","она","его","ее","они")
+pronouns.df = data.frame(words = pers.pronouns, stringsAsFactors = FALSE)
+pron.dtm = vv.tidy %>%
+    inner_join(pronouns.df) %>%
+    group_by(Shop) %>%
+    dplyr::count(words, sort=TRUE) %>%
+    cast_sparse(Shop, words, n) %>% 
+  as.matrix()
+
+
+lsa::cosine(t(pron.dtm))
+
+```
+Тексты очень похожи .
+
+
+```{r}
+text_reccomendations.tidy = text_reccomendations %>%    
+  select(Shop, Texts) %>% 
+  unnest_tokens(words, Texts)
+```
+
+Удалим стоп-слова, а также слишком редкие слова по порогу (те, что встретились меньше 5 раз).
+
+```{r}
+rustopwords = data.frame(words=stopwords::stopwords("ru"), stringsAsFactors=FALSE) 
+# словарь со стоп-словами
+
+text_reccomendations.tidy = text_reccomendations.tidy %>%
+  anti_join(rustopwords)
+
+words_count = text_reccomendations.tidy %>% 
+  dplyr::count(words) 
+
+words_count %>% 
+  ggplot() + 
+  geom_histogram(aes(x = n)) + 
+  theme_bw()
+
+#сколько слов встречается в текстах всего один раз?
+quantile(words_count$n, 0.55)
+quantile(words_count$n, 0.65)
+
+#удалим слишком редкие и наоборот, слишком распространенные
+words_count = words_count %>% 
+  filter(n > 5 & n < quantile(words_count$n, 0.95))
+
+text_reccomendations.tidy = text_reccomendations.tidy %>% 
+  filter(words %in% words_count$words)
+
+```
+
+После всей чистки у нас осталось сильно меньше слов, чем было изначально. Поэтому от некоторых отзывов могло или совсем ничего или пара слов. Уберем такие отзывы из базы для дальнейшего анализа. 
+
+```{r}
+# удалить отзывы от которых осталось мало слов
+reviews_count = text_reccomendations.tidy %>%
+    dplyr::count(Shop) %>%
+    filter(n > 5) 
+
+# для оставшихся отзывов посчитаем метрику TF-IDF
+reviews_tf_idf = text_reccomendations.tidy %>%
+    filter(Shop %in% reviews_count$Shop) %>%
+    dplyr::count(Shop, words) %>%
+    bind_tf_idf(words, Shop, n)
+reviews_tf_idf
+```
+
+Если у нас уже есть частоты в длинном формате, то в широкий их можно преобразовать с помощью функций из пакета tidyr -- pivot_wider()
+```{r}
+# приведем данные к широкому формату. создадим term-document matrix
+library(tidyr)
+reviews.tdm = reviews_tf_idf %>%
+    dplyr::select(Shop, words, tf_idf) %>%
+    pivot_wider(names_from = words, 
+                values_from = tf_idf, 
+                values_fill = 0) 
+```
+
+Посчитаем косинусное расстояние между двумя векторами отзывов. Эти два текста наиболее похожи друг на друга.
+
+```{r}
+
+review1 = reviews.tdm %>%
+    filter(Shop == "Letual") %>%
+    dplyr::select(-Shop) %>%
+    as.numeric()
+
+review2 = reviews.tdm %>%
+    filter(Shop == "Rainbow_smile") %>%
+    dplyr::select(-Shop) %>% 
+    as.numeric()
+
+#text = rbind(review1, review2)
+
+lsa::cosine(review1, review2)
+
+```
+
+```{r}
+review1 = reviews.tdm %>%
+    filter(Shop == "Magnit") %>%
+    dplyr::select(-Shop) %>%
+    as.numeric()
+
+review2 = reviews.tdm %>%
+    filter(Shop == "Rainbow_smile") %>%
+    dplyr::select(-Shop) %>% 
+    as.numeric()
+
+#text = rbind(review1, review2)
+
+lsa::cosine(review1, review2)
+```
+
+```{r}
+review1 = reviews.tdm %>%
+    filter(Shop == "Podrugka") %>%
+    dplyr::select(-Shop) %>%
+    as.numeric()
+
+review2 = reviews.tdm %>%
+    filter(Shop == "Rainbow_smile") %>%
+    dplyr::select(-Shop) %>% 
+    as.numeric()
+
+#text = rbind(review1, review2)
+
+lsa::cosine(review1, review2)
+```
+Больше всего отзывы про Улыбку Радуги похожи на отзывы про Магнит косметик.
+Ок, но про что пишут наши покупатели и какая эмоциональная окраска присутствуетсв каждом отзыве по магазинам?
+
+
+```{r}
+sentdict <- read.table("~/shared/minor2_2020/2-tm-net/lab05-sentiment/sentdict.txt", header=T, stringsAsFactors=F) # словарь оценочной лексики
+
+```
+
+Так, для каждого отзыва мы можем посчитать, насколько оценочный характер он носит -- без привязки к характеру (позитивный или негативный). 
+
+```{r}
+library(tidyverse)
+library(tidytext)
+
+reviews.tidy = text_reccomendations %>% 
+  select(Authors, Texts) %>% 
+  unnest_tokens(words, Texts)
+
+rustopwords <- data.frame(words=stopwords::stopwords("ru"), stringsAsFactors=FALSE) 
+# словарь со стоп-словами
+
+reviews.tidy = reviews.tidy %>%
+  anti_join(rustopwords)
+
+reviews.sent = reviews.tidy %>% 
+  inner_join(sentdict) #почему используется inner_join, а не anti_join?
+
+reviews.sent_count = reviews.sent %>% 
+  group_by(Authors) %>% 
+  summarise(mean = mean(value)) #посчитаем
+
+reviews.sent_count %>% arrange(-mean) %>% head() # самые оценочные отзывы
+text_reccomendations$Texts[text_reccomendations$Authors == "gwenh"]
+
+reviews.sent_count %>% arrange(mean) %>% head() # самые нейтральные отзывы
+text_reccomendations$Texts[text_reccomendations$Authors == "Каа"]
+```
+
+
+```{r}
+reviews.sent_count %>% 
+ggplot(aes(x = mean))+
+  geom_histogram()
+```
+
+```{r}
+reviews.sent_count %>% 
+ggplot(aes(x = mean, fill = stat(x > 0.30)))+
+  ggdist::stat_dotsinterval(quantiles = 1000)+
+  theme_minimal()
+```
+А если брать только Улыбку радуги?
+
+Так, для каждого отзыва мы можем посчитать, насколько оценочный характер он носит -- без привязки к характеру (позитивный или негативный). 
+
+```{r}
+library(tidyverse)
+library(tidytext)
+text_reccomendations1=text_reccomendations %>% filter(Shop=="Rainbow_smile")
+reviews.tidy = text_reccomendations1 %>% 
+  select(Authors, Texts) %>% 
+  unnest_tokens(words, Texts)
+
+rustopwords <- data.frame(words=stopwords::stopwords("ru"), stringsAsFactors=FALSE) 
+# словарь со стоп-словами
+
+reviews.tidy = reviews.tidy %>%
+  anti_join(rustopwords)
+
+reviews.sent = reviews.tidy %>% 
+  inner_join(sentdict) #почему используется inner_join, а не anti_join?
+
+reviews.sent_count = reviews.sent %>% 
+  group_by(Authors) %>% 
+  summarise(mean = mean(value)) #посчитаем
+
+reviews.sent_count %>% arrange(-mean) %>% head() # самые оценочные отзывы
+text_reccomendations$Texts[text_reccomendations$Authors == "Ivica"]
+
+reviews.sent_count %>% arrange(mean) %>% head() # самые нейтральные отзывы
+text_reccomendations$Texts[text_reccomendations$Authors == "BLONDINKA48"]
+```
+
+
+```{r}
+reviews.sent_count %>% 
+ggplot(aes(x = mean))+
+  geom_histogram()
+```
+# Our dict
+
+Теперь мы можем попытаться создать свой специфичный для наших данных сентимент-словарь.
+
+
+Возьмем за отрицательные отзывы все те, кто оценил отель на 1-2 балла, а положительные -- на 5. Посмотрим распределение оценок посетителей 
+
+```{r}
+text_reccomendations %>% ggplot() + 
+  geom_bar(aes(Rating)) + 
+  theme_bw()
+```
+
+```{r}
+positive =  reviews.sent %>%
+  filter(Authors %in% text_reccomendations$Authors[text_reccomendations$Rating==5]) %>% 
+  mutate(sent = "positive")
+
+#можно дополнительно отфильтровать по полезности отзыва (stars == 5)
+
+negative = reviews.sent %>% 
+  filter(Authors %in% text_reccomendations$Authors[text_reccomendations$Rating<3]) %>% 
+  mutate(sent = "negative")
+
+reviews.pmi = bind_rows(positive, negative) %>% 
+  dplyr::select(-Authors,-value)
+
+
+reviews.pmi = reviews.pmi %>% 
+  dplyr::count(words, sent) %>% 
+  pivot_wider(names_from = sent, values_from = n, values_fill = 0)
+```
+
+
+Отберем оценочные слова из словаря Четверкина, характерные для каждого из классов с помощью PMI. 
+
+```{r}
+freq_p = reviews.pmi$positive
+freq_n = reviews.pmi$negative
+
+sum_p = sum(reviews.pmi$positive) 
+sum_n = sum(reviews.pmi$negative) 
+
+pmi_p = log((freq_p/sum_p)/((freq_p+freq_n)/(sum_p+sum_n)*sum_p/(sum_p+sum_n))+1)
+reviews.pmi$PMI_p = pmi_p
+
+pmi_n = log((freq_n/sum_n)/((freq_p+freq_n)/(sum_p+sum_n)*sum_n/(sum_p+sum_n))+1)
+reviews.pmi$PMI_n = pmi_n
+
+reviews.pmi %>% 
+  ggplot(aes(x=log(positive+negative), y=PMI_p-PMI_n, color=5*PMI_p-PMI_n, label=words)) +
+  scale_color_gradient2(low="red", high="blue") +
+  geom_point()
+
+reviews.pmi %>% 
+  ggplot(aes(x=log(positive+negative), y=PMI_p-PMI_n, color=5*PMI_p-PMI_n, label=words)) +
+  scale_color_gradient2(low="red", high="blue") +
+  geom_text(check_overlap = TRUE)
+```
+
+## Dunning log-likelihood (G2)
+
+
+```{r}
+g2 = function(a, b) {
+  c = sum(a)
+  d = sum(b)
+  E1 = c * ((a + b) / (c + d))
+  E2 = d * ((a + b) / (c + d))
+  return(2*((a*log(a/E1+1e-7)) + (b*log(b/E2+1e-7))))
+}
+
+reviews.pmi <- reviews.pmi %>% 
+  mutate(g2=g2(positive, negative))
+```
+
+
+Посмотрим на соотношения частотности, PMI и G2:
+
+```{r message=FALSE, warning=FALSE}
+reviews.pmi %>% 
+  ggplot(aes(x=log(positive-negative), y=g2, color=5*PMI_p-PMI_n, label=words)) +
+  scale_color_gradient2(low="red", high="blue") +
+  geom_point() 
+
+
+reviews.pmi %>% 
+  filter(PMI_p>0.5 | PMI_n>0.5) %>% 
+  ggplot(aes(x=log(positive-negative), y=g2, color=5*PMI_p-PMI_n, label=words)) + 
+  scale_color_gradient2(low="red", high="blue") + 
+  geom_text(check_overlap=TRUE)
+```
+
+```{r message=FALSE, warning=FALSE}
+library(wordcloud)
+library(reshape2)
+
+reviews.pmi %>% 
+  filter(PMI_p>0.5 | PMI_n>0.5) %>% 
+  mutate(sentiment = case_when(
+    PMI_p > 0.5 ~ "Positive",
+    PMI_n > 0.5 ~ "Negative"
+  ),
+  n = log(negative + positive)) %>% 
+  # count(word, sentiment, sort = TRUE) %>%
+  select(words, sentiment, n) %>% 
+  arrange(-n) %>% 
+  group_by(sentiment) %>% 
+  top_n(20, n) %>% 
+  acast(words ~ sentiment, value.var = "n", fill = 0) %>%
+  comparison.cloud(colors = c("red", "black"),
+                   max.words = 100, scale=c(1.4,.25))
+?comparison.cloud
+```
+
+## Теперь посмотрим- о чем конкретно пишут наши покупатели, лематизизируя слова, отобрав самые часто встречающиеся словосочетания и,систематизируя используя семантический контекст, мы составим словосочетания в зависимости от части речи.
+
+Пока что единицей измерения текста у нас были отдельные слова. Тем самым мы полностью игнорировали информацию о последовательности слов в тексте. По этой причине векторное представление документа еще называют «мешком слов» (bag of words), потому что мы рассматриваем набор слов, но не их порядок. Однако есть простой способ, принципиально не меняя наших инструментов измерения текста, инкорпорировать в них информацию о последовательности слов — *n-граммы*. Вместо одного слова возьмем в качестве единицы несколько стоящих подряд слов. 
+
+```{r}
+#install.packages("udpipe")
+vignette("udpipe-tryitout", package = "udpipe")
+vignette("udpipe-annotation", package = "udpipe")
+vignette("udpipe-universe", package = "udpipe")
+vignette("udpipe-usecase-postagging-lemmatisation", package = "udpipe")
+# An overview of keyword extraction techniques: https://bnosac.github.io/udpipe/docs/doc7.html
+vignette("udpipe-usecase-topicmodelling", package = "udpipe")
+vignette("udpipe-parallel", package = "udpipe")
+vignette("udpipe-train", package = "udpipe")
+library(tidyverse)
+library(tidytext)
+library(readr)
+text_reccomendations <- read_excel("~/text_reccomendations.xlsx", 
+    col_types = c("numeric", "text", "text", 
+        "date", "text", "numeric", "text"))
+library(udpipe)
+library(textrank)
+#Теперь добавим модель- там содержатся большинство слов , разделенных по частям речи
+enmodel <- udpipe_download_model(language = "russian")
+str(enmodel)
+s0 <-udpipe(text_reccomendations$Texts, object = enmodel)
+x0 <- data.frame(s0)
+library(lattice)
+stats <- txt_freq(x0$upos)
+stats$key <- factor(stats$key, levels = rev(stats$key))
+barchart(key ~ freq, data = stats, col = "green", 
+         main = "UPOS (Universal Parts of Speech)\n frequency of occurrence", 
+         xlab = "Freq")
+x0= x0 %>% dplyr::filter(upos != "PUNCT")
+x0= x0 %>% dplyr::filter(upos != "NUM")
+
+## NOUNS
+stats <- subset(x0, upos %in% c("NOUN")) 
+stats <- txt_freq(stats$lemma) 
+stats$key <- factor(stats$key, levels = rev(stats$key))
+barchart(key ~ freq, data = head(stats, 22), col = "cadetblue", 
+         main = "Most occurring nouns", xlab = "Freq")
+## ADJECTIVES
+stats <- subset(x0, upos %in% c("ADJ")) 
+stats <- txt_freq(stats$lemma)
+stats$key <- factor(stats$key, levels = rev(stats$key))
+barchart(key ~ freq, data = head(stats, 20), col = "purple", 
+         main = "Most occurring adjectives", xlab = "Freq")
+## NOUNS
+stats <- subset(x0, upos %in% c("VERB")) 
+stats <- txt_freq(stats$lemma)
+stats$key <- factor(stats$key, levels = rev(stats$key))
+barchart(key ~ freq, data = head(stats, 20), col = "gold", 
+         main = "Most occurring Verbs", xlab = "Freq")
+
+
+```
+
+```{r}
+library(rakeR)
+keywords1 <- keywords_rake(x = x0, term = "lemma", group = "doc_id", 
+                          relevant = x0$upos %in% c("ADJ", "VERB"), sep = " ")
+head(keywords1)
+
+
+keywords2 <- keywords_rake(x = x0, term = "lemma", group = c("doc_id", "sentence_id"), 
+                          relevant = x0$upos %in% c("ADJ", "NOUN"))
+head(keywords2)
+
+keywords3 <- keywords_rake(x = x0, term = "lemma", group = c("doc_id", "sentence_id"), 
+                         relevant = x0$upos %in% c("NOUN", "PRON"), ngram_max = 10, n_min = 2, sep = " ") 
+#?keywords_rake()
+head(keywords3)
+```
+
+## Кажется,чтобы понять как о нас отзываются - следует изъять прилагательное с существительным, а затем посмотрееть, положительные и отризательные эти n-gramms.
+
+```{r}
+keywords2.tidy = keywords2 %>% 
+  select(rake, keyword) %>% 
+  unnest_tokens(words, keyword)
+
+keywords2.sent = keywords2.tidy %>% 
+  inner_join(sentdict) #почему используется inner_join, а не anti_join?
+
+keywords2.sent_count =  keywords2.sent %>% 
+  group_by(words) %>% 
+  summarise(mean = mean(value))  #посчитаем
+keywords2.sent_count
+```
+
+```{r}
+library(stm)
+keywords2.sent_count = keywords2.sent_count %>% mutate(Estimate = case_when(mean<=0.4 ~"Negative",mean>0.4 ~"Positive"))
+keywords2.bad = keywords2.sent_count %>% filter (Estimate=="Negative")
+keywords2.Pos= keywords2.sent_count %>% filter (Estimate=="Positive")
+wordcloud2(data = keywords2.bad)
+wordcloud2(data = keywords2.Pos)
+```
+
+## Тематика
+
+Мы рассмотрели комментарии на похожесть, посмотрели их эмоциональную окраску, составили самые часто встречающиеся словосочетания по части речи и выяснили - какова их окраска.
+
+Теперь посмотрим на предполагаемую тематику .( на какие темы мы можем разбить наши комментарии).
+
+
+*Тематическая модель*:
+  - каждый текст в корпусе представляет собой смесь из определённого количества тем 
+  - «тема» — набор слов, которые могут с разными вероятностями употребляться при обсуждении данной темы
+  - топики распределены в каждом документе по-разному, и выраженность темы в тексте определяется тем, насколько чаще слова из этой темы встречаются чаще остальных 
+  
+*Структурная тематическая модель*: характеристики тематической модели +
+  - возможность выяснить, как пропорция слов каждого топика в документе меняется в зависимости от ковариатов – категорий, присвоенных каждому тексту исследователем (*prevalence covariates*)
+  - возможность выяснить, как категория текста влияет на распределение слов **внутри темы** (например, как разные политические партии говорят о демократии)
+  - позволяет посмотреть на корреляцию тем (насколько часто они обсуждаются в одном документе)
+
+
+```{r}
+library(tidytext)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(stringr)
+
+text_reccomendations <- read_excel("~/text_reccomendations.xlsx", 
+    col_types = c("numeric", "text", "text", 
+        "date", "text", "numeric", "text"))
+text_reccomendations$Texts= str_replace_all(text_reccomendations$Texts, "[[:punct:]]", "")
+text_reccomendations$Texts= str_replace_all(text_reccomendations$Texts, "[[:digit:]]", "")
+
+  
+
+# удаляем стоп-слова
+data("stop_words")
+names(stop_words)[1] = "word_lemma"
+
+
+processed <- textProcessor(text_reccomendations$Texts, metadata = text_reccomendations) 
+out <- prepDocuments(processed$documents, processed$vocab, processed$meta)
+docs <- out$documents
+vocab <- out$vocab
+meta <- out$meta
+plotRemoved(processed$documents, lower.thresh = seq(1, 200, by = 100))
+out <- prepDocuments(processed$documents, processed$vocab, processed$meta, lower.thresh = 15)
+poliblogPrevFit <- stm(documents = out$documents, vocab = out$vocab, K = 12, prevalence = ~ Shop, max.em.its = 75, data = out$meta, init.type = "Spectral")
+plot(poliblogPrevFit, type = "summary", xlim = c(0, 0.3))
+```
+
+
+
+
+
+
+
+
+
+
+
+
